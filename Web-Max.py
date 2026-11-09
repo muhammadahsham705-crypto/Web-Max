@@ -6,6 +6,7 @@ import urllib.error
 import ssl
 import time
 import socket
+import re
 
 # Force a global socket timeout so requests never hang indefinitely
 socket.setdefaulttimeout(5)
@@ -21,7 +22,62 @@ M = "\033[35m" # Magenta
 C = "\033[36m" # Cyan
 W = "\033[37m" # White
 GRAY = "\033[90m"
+BOLD = "\033[1m"
 RESET = "\033[0m"
+
+# ====================================
+# Exact Security Header Validation Rules
+# ====================================
+SECURITY_HEADERS = {
+    "Strict-Transport-Security": {
+        "severity": "CRITICAL",
+        "weight": 3,
+        "desc": "Enforces secure HTTPS transport.",
+        "validator": lambda val: "max-age=" in val and int(re.search(r'max-age=(\d+)', val).group(1)) >= 31536000 if re.search(r'max-age=(\d+)', val) else False,
+        "fail_reason": "Missing, disabled, or max-age is set below 1 year (31536000s).",
+        "fix": "Add header: Strict-Transport-Security: max-age=31536000; includeSubDomains"
+    },
+    "Content-Security-Policy": {
+        "severity": "CRITICAL",
+        "weight": 3,
+        "desc": "Mitigates Cross-Site Scripting (XSS) and injection vectors.",
+        "validator": lambda val: "unsafe-inline" not in val and "unsafe-eval" not in val and "*" not in val,
+        "fail_reason": "Configured insecurely (contains 'unsafe-inline', 'unsafe-eval', or wildcards).",
+        "fix": "Implement a robust CSP header (e.g., Content-Security-Policy: default-src 'self')."
+    },
+    "X-Frame-Options": {
+        "severity": "HIGH",
+        "weight": 2,
+        "desc": "Protects against UI redress / clickjacking.",
+        "validator": lambda val: val.upper() in ["DENY", "SAMEORIGIN"],
+        "fail_reason": "Value is not strictly DENY or SAMEORIGIN.",
+        "fix": "Add header: X-Frame-Options: DENY or SAMEORIGIN"
+    },
+    "X-Content-Type-Options": {
+        "severity": "HIGH",
+        "weight": 2,
+        "desc": "Prevents MIME-type sniffing exploits.",
+        "validator": lambda val: "nosniff" in val.lower(),
+        "fail_reason": "Does not enforce 'nosniff'.",
+        "fix": "Add header: X-Content-Type-Options: nosniff"
+    },
+    "Referrer-Policy": {
+        "severity": "MEDIUM",
+        "weight": 1,
+        "desc": "Controls sensitive URL leakages in HTTP referrers.",
+        "validator": lambda val: any(p in val.lower() for p in ["no-referrer", "strict-origin", "same-origin"]),
+        "fail_reason": "Permits excessive path or query parameter leakage.",
+        "fix": "Set Referrer-Policy: strict-origin-when-cross-origin"
+    },
+    "Permissions-Policy": {
+        "severity": "MEDIUM",
+        "weight": 1,
+        "desc": "Restricts sensitive browser API access (camera, mic, geo).",
+        "validator": lambda val: len(val.strip()) > 0 and "=" in val,
+        "fail_reason": "Entirely unconfigured or invalid policy string.",
+        "fix": "Define explicit Permissions-Policy (e.g., camera=(), microphone=())."
+    }
+}
 
 def type_text(text, delay=0.008):
     """Prints text with a smooth typing animation effect."""
@@ -43,9 +99,27 @@ BANNER = f"""{C}
 
 def banner():
     print(BANNER)
-    type_text(G + "       [+] Advanced Website Flaw Finder & Remediator" + RESET, 0.005)
+    type_text(G + "       [+] Advanced Website Flaw Finder & Remediator (v2.0)" + RESET, 0.005)
     type_text(Y + "       [+] Universal Domain, Subdomain & IP Support" + RESET, 0.005)
     type_text(C + "       " + "═" * 63 + RESET + "\n", 0.002)
+
+def get_exact_grade(score, critical_failures):
+    """Applies strict penalty caps: any critical flaw caps the grade immediately."""
+    if critical_failures > 0 and score > 60:
+        score = 60.0
+
+    if score >= 95:
+        return f"{G}{BOLD}A+ (Fortified){RESET}"
+    elif score >= 85:
+        return f"{G}A (Acceptable){RESET}"
+    elif score >= 75:
+        return f"{Y}B (Suboptimal){RESET}"
+    elif score >= 60:
+        return f"{Y}C (Vulnerable){RESET}"
+    elif score >= 40:
+        return f"{R}D (High Risk){RESET}"
+    else:
+        return f"{R}{BOLD}F (Critical Exposure / Defenseless){RESET}"
 
 def audit_target(url):
     url = url.strip()
@@ -55,53 +129,68 @@ def audit_target(url):
     type_text(f"\n{Y}[*]{W} Connecting to target: {C}{url}{RESET}", 0.01)
     
     findings = []
+    earned_points = 0
+    total_points = sum(meta["weight"] for meta in SECURITY_HEADERS.values())
+    critical_count = 0
+    passed_count = 0
+
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'WebMax-Auditor/2.0'})
         
-        # Unverified SSL context to ensure custom/preview domains work
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
 
-        type_text(f"{GRAY}[~] Sending request and awaiting response...{RESET}", 0.005)
+        type_text(f"{GRAY}[~] Sending request and awaiting exact header analysis...{RESET}", 0.005)
         
         with urllib.request.urlopen(req, context=context, timeout=5) as res:
-            headers = dict(res.headers)
+            headers = {k.title(): v for k, v in res.headers.items()}
             final_url = res.url
-            type_text(f"{G}[+]{W} Connection established! Status Code: {G}{res.status}{RESET}", 0.01)
+            status_code = res.status
+            type_text(f"{G}[+]{W} Connection established! Status Code: {G}{status_code}{RESET}", 0.01)
 
+            # Check HTTP protocol
             if not final_url.startswith("https://"):
+                critical_count += 1
                 findings.append({
                     "flaw": "Insecure HTTP Protocol",
-                    "sev": "HIGH",
-                    "desc": "Data transmitted in cleartext, exposing it to man-in-the-middle sniffing.",
+                    "sev": "CRITICAL",
+                    "desc": "Data transmitted in cleartext over unencrypted HTTP.",
                     "fix": "Force HTTPS redirection and enable HSTS across your domain configuration."
                 })
 
-            if "Strict-Transport-Security" not in headers:
-                findings.append({
-                    "flaw": "Missing HSTS Header",
-                    "sev": "MEDIUM",
-                    "desc": "Browser does not enforce secure connections on subsequent visits.",
-                    "fix": "Add header: Strict-Transport-Security: max-age=31536000; includeSubDomains"
-                })
+            # Rigorous header inspection loop
+            for header, meta in SECURITY_HEADERS.items():
+                if header in headers:
+                    val = headers[header]
+                    try:
+                        is_secure = meta["validator"](val)
+                    except Exception:
+                        is_secure = False
 
-            if "Content-Security-Policy" not in headers:
-                findings.append({
-                    "flaw": "Missing Content Security Policy (CSP)",
-                    "sev": "HIGH",
-                    "desc": "No script restriction policy, making the app vulnerable to XSS injection.",
-                    "fix": "Implement a robust CSP header (e.g., Content-Security-Policy: default-src 'self')."
-                })
+                    if is_secure:
+                        earned_points += meta["weight"]
+                        passed_count += 1
+                    else:
+                        if meta["severity"] == "CRITICAL":
+                            critical_count += 1
+                        findings.append({
+                            "flaw": f"Insecure Value: {header}",
+                            "sev": meta["severity"],
+                            "desc": f"Header present but failed validation. Reason: {meta['fail_reason']} (Value: {val})",
+                            "fix": meta["fix"]
+                        })
+                else:
+                    if meta["severity"] == "CRITICAL":
+                        critical_count += 1
+                    findings.append({
+                        "flaw": f"Missing Header: {header}",
+                        "sev": meta["severity"],
+                        "desc": meta["desc"],
+                        "fix": meta["fix"]
+                    })
 
-            if "X-Frame-Options" not in headers:
-                findings.append({
-                    "flaw": "Missing X-Frame-Options Header",
-                    "sev": "MEDIUM",
-                    "desc": "Website can be embedded in an iframe, allowing clickjacking attacks.",
-                    "fix": "Add header: X-Frame-Options: DENY or SAMEORIGIN"
-                })
-
+            # Check Server Version Disclosure
             if "Server" in headers:
                 findings.append({
                     "flaw": "Server Version Disclosure",
@@ -111,25 +200,25 @@ def audit_target(url):
                 })
 
     except urllib.error.HTTPError as e:
-        type_text(f"{Y}[!]{W} Target returned HTTP Error Code: {Y}{e.code}{RESET} (Note: Protected/Auth walls may block scans)", 0.01)
+        type_text(f"{Y}[!]{W} Target returned HTTP Error Code: {Y}{e.code}{RESET}", 0.01)
         return
     except socket.timeout:
-        type_text(f"{R}[!]{W} Connection timed out. The server took too long or blocked the request.{RESET}", 0.01)
+        type_text(f"{R}[!]{W} Connection timed out.{RESET}", 0.01)
         return
     except Exception as e:
         type_text(f"{R}[!]{W} Connection failed: {e}{RESET}", 0.01)
         return
 
     type_text(f"\n{C}" + "="*65, 0.002)
-    type_text(f"                 WEB-MAX AUDIT & REMEDIATION REPORT                ", 0.005)
+    type_text(f"             WEB-MAX EXACT AUDIT & REMEDIATION REPORT             ", 0.005)
     type_text("="*65 + RESET, 0.002)
 
     if not findings:
-        type_text(f"\n{G}[+]{W} No critical header vulnerabilities found! Clean security posture.\n", 0.01)
+        type_text(f"\n{G}[+]{W} Zero vulnerabilities found! Flawless security posture.\n", 0.01)
     else:
-        type_text(f"\n{R}[!]{W} Total Vulnerabilities Detected: {R}{len(findings)}{RESET}\n", 0.01)
+        type_text(f"\n{R}[!]{W} Total Flaws Detected: {R}{len(findings)}{RESET}\n", 0.01)
         for i, f_item in enumerate(findings, 1):
-            sev_col = R if f_item["sev"] == "HIGH" else (Y if f_item["sev"] == "MEDIUM" else B)
+            sev_col = R if f_item["sev"] == "CRITICAL" else (Y if f_item["sev"] == "HIGH" or f_item["sev"] == "MEDIUM" else B)
             type_text(f"{W}[{i}] Flaw Name : {sev_col}{f_item['flaw']} [{f_item['sev']}]{RESET}", 0.01)
             type_text(f"    {C}Details : {W}{f_item['desc']}{RESET}", 0.008)
             type_text(f"    {G}Solution: {W}{f_item['fix']}{RESET}", 0.008)
@@ -153,9 +242,9 @@ def main():
             if target:
                 audit_target(target)
         elif choice == "2" or choice == "02":
-            type_text(f"\n{B}[Info]{W} Web-Max is an advanced web security auditing tool built to scan", 0.01)
-            type_text(f"       any target URL or domain for missing headers, protocol flaws,", 0.01)
-            type_text(f"       and configuration errors, providing instant developer remediation fixes.{RESET}", 0.01)
+            type_text(f"\n{B}[Info]{W} Web-Max is an advanced web security auditing framework built to scan", 0.01)
+            type_text(f"       any target URL or domain with exact validation for missing headers,", 0.01)
+            type_text(f"       weak configurations, and protocol flaws, providing instant remediation fixes.{RESET}", 0.01)
             type_text(f"\n{Y}[*] Press Enter to continue...{RESET}", 0.01)
             input()
         elif choice == "3" or choice == "03":
