@@ -1,7 +1,7 @@
 **Web-Max (v2.0)🛡️**
 
 Web-Max is a terminal-based web security auditing and remediation tool built in Python. Unlike basic tools that only verify whether a header exists, Web-Max performs deep semantic validation to inspect exact header values (such as verifying HSTS `max-age` thresholds or checking CSP for `unsafe-inline` directives).
-**___________________________________________________________________________________________________________________________________________________**
+**________________________________________________________________________________________________________________________________________**
 
 **✨ What's New in v2.0:**
 
@@ -16,7 +16,7 @@ Enforces strict score caps when critical security vectors are exposed.
 
 **Direct Flaw Reporting:**                                                                                                                         
 Clean terminal output displaying specific vulnerabilities and actionable developer solutions without cluttered UI elements.
-**___________________________________________________________________________________________________________________________________________________**
+**________________________________________________________________________________________________________________________________________**
 
 **🚀 Installation & Usage:**
 
@@ -33,7 +33,7 @@ cd Web-Max
 # Run Web-Max
 python3 Web-Max.py
 ```
-**___________________________________________________________________________________________________________________________________________________**
+**________________________________________________________________________________________________________________________________________**
 
 **2. Updating an Existing Installation:**
 
@@ -48,7 +48,7 @@ git pull
 # Run the updated tool
 python3 Web-Max.py
 ```
-**___________________________________________________________________________________________________________________________________________________**
+**________________________________________________________________________________________________________________________________________**
 
 **📜 License:**
 **This project is released under the MIT License. Free to use and audit**
