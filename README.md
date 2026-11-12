@@ -25,7 +25,7 @@ Clean terminal output displaying specific vulnerabilities and actionable develop
 *To download and run Web-Max for the first time:*
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/Web-Max.git
+git clone https://github.com/muhammadahsha05-crypto/Web-Max.git
 
 # Navigate into the project directory
 cd Web-Max
