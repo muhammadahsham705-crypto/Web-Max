@@ -1,4 +1,4 @@
-#!/usr/init/env python3
+#!/usr/bin/env python3
 import sys
 import json
 import urllib.request
@@ -34,7 +34,7 @@ SECURITY_HEADERS = {
         "weight": 3,
         "desc": "Enforces secure HTTPS transport.",
         "validator": lambda val: "max-age=" in val and int(re.search(r'max-age=(\d+)', val).group(1)) >= 31536000 if re.search(r'max-age=(\d+)', val) else False,
-        "fail_reason": "Missing, disabled, or max-age is set below 1 year (31536000s).",
+        "fail_reason": "Missing, disabled, or max-age < 1 year.",
         "fix": "Add header: Strict-Transport-Security: max-age=31536000; includeSubDomains"
     },
     "Content-Security-Policy": {
@@ -42,7 +42,7 @@ SECURITY_HEADERS = {
         "weight": 3,
         "desc": "Mitigates Cross-Site Scripting (XSS) and injection vectors.",
         "validator": lambda val: "unsafe-inline" not in val and "unsafe-eval" not in val and "*" not in val,
-        "fail_reason": "Configured insecurely (contains 'unsafe-inline', 'unsafe-eval', or wildcards).",
+        "fail_reason": "Insecure config (contains unsafe-inline/eval/wildcard).",
         "fix": "Implement a robust CSP header (e.g., Content-Security-Policy: default-src 'self')."
     },
     "X-Frame-Options": {
@@ -66,7 +66,7 @@ SECURITY_HEADERS = {
         "weight": 1,
         "desc": "Controls sensitive URL leakages in HTTP referrers.",
         "validator": lambda val: any(p in val.lower() for p in ["no-referrer", "strict-origin", "same-origin"]),
-        "fail_reason": "Permits excessive path or query parameter leakage.",
+        "fail_reason": "Permits excessive parameter leakage.",
         "fix": "Set Referrer-Policy: strict-origin-when-cross-origin"
     },
     "Permissions-Policy": {
@@ -74,7 +74,7 @@ SECURITY_HEADERS = {
         "weight": 1,
         "desc": "Restricts sensitive browser API access (camera, mic, geo).",
         "validator": lambda val: len(val.strip()) > 0 and "=" in val,
-        "fail_reason": "Entirely unconfigured or invalid policy string.",
+        "fail_reason": "Unconfigured or invalid policy string.",
         "fix": "Define explicit Permissions-Policy (e.g., camera=(), microphone=())."
     }
 }
@@ -99,27 +99,9 @@ BANNER = f"""{C}
 
 def banner():
     print(BANNER)
-    type_text(G + "       [+] Advanced Website Flaw Finder & Remediator (v2.0)" + RESET, 0.005)
+    type_text(G + "       [+] Advanced Website Flaw Finder & Remediator (Exact Edition)" + RESET, 0.005)
     type_text(Y + "       [+] Universal Domain, Subdomain & IP Support" + RESET, 0.005)
     type_text(C + "       " + "═" * 63 + RESET + "\n", 0.002)
-
-def get_exact_grade(score, critical_failures):
-    """Applies strict penalty caps: any critical flaw caps the grade immediately."""
-    if critical_failures > 0 and score > 60:
-        score = 60.0
-
-    if score >= 95:
-        return f"{G}{BOLD}A+ (Fortified){RESET}"
-    elif score >= 85:
-        return f"{G}A (Acceptable){RESET}"
-    elif score >= 75:
-        return f"{Y}B (Suboptimal){RESET}"
-    elif score >= 60:
-        return f"{Y}C (Vulnerable){RESET}"
-    elif score >= 40:
-        return f"{R}D (High Risk){RESET}"
-    else:
-        return f"{R}{BOLD}F (Critical Exposure / Defenseless){RESET}"
 
 def audit_target(url):
     url = url.strip()
@@ -174,10 +156,13 @@ def audit_target(url):
                     else:
                         if meta["severity"] == "CRITICAL":
                             critical_count += 1
+                        
+                        # Shorten long values cleanly
+                        val_snippet = (val[:35] + '...') if len(val) > 35 else val
                         findings.append({
                             "flaw": f"Insecure Value: {header}",
                             "sev": meta["severity"],
-                            "desc": f"Header present but failed validation. Reason: {meta['fail_reason']} (Value: {val})",
+                            "desc": f"{meta['fail_reason']} Value: [{val_snippet}]",
                             "fix": meta["fix"]
                         })
                 else:
@@ -192,10 +177,11 @@ def audit_target(url):
 
             # Check Server Version Disclosure
             if "Server" in headers:
+                server_val = (headers['Server'][:30] + '...') if len(headers['Server']) > 30 else headers['Server']
                 findings.append({
                     "flaw": "Server Version Disclosure",
                     "sev": "LOW",
-                    "desc": f"Reveals backend server details: {headers['Server']}",
+                    "desc": f"Reveals backend server details: {server_val}",
                     "fix": "Hide or remove the Server response header in your web server configuration."
                 })
 
